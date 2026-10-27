@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agente · Registro de Contratos Vigentes</title>
+<style>
+  :root { --bg:#f5f6f8; --panel:#fff; --txt:#1d2433; --muted:#6b7280; --borde:#e3e6ec; --pri:#0b5cad; --user:#e8f0fb; --ok:#127a3e; --err:#b42318; --warn:#fff5d6; --warnb:#e0a800; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151b; --panel:#1b1f27; --txt:#e6e8ec; --muted:#9aa3b2; --borde:#2c3240; --pri:#5aa2f0; --user:#1f2b3d; --ok:#4cc38a; --err:#ff6b6b; --warn:#3a3214; --warnb:#e0b43a; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--txt); }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--borde); }
+  header h1 { font-size:16px; margin:0; }
+  header small { color:var(--muted); }
+  .acciones button { margin-left:6px; }
+  main { max-width:980px; margin:0 auto; padding:16px 16px 140px; }
+  .msg { margin:12px 0; padding:12px 14px; border-radius:10px; background:var(--panel); border:1px solid var(--borde); overflow-x:auto; }
+  .msg.user { background:var(--user); margin-left:15%; }
+  .msg.confirmar { border:2px solid var(--warnb); background:var(--warn); }
+  .rol { font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .banner { font-weight:600; margin-bottom:8px; }
+  details.tool { margin:6px 0; border:1px solid var(--borde); border-radius:8px; padding:6px 10px; font-size:13px; background:var(--bg); }
+  details.tool summary { cursor:pointer; }
+  .estado-ok { color:var(--ok); } .estado-err { color:var(--err); }
+  pre { white-space:pre-wrap; word-break:break-word; font-size:12px; background:var(--panel); border:1px solid var(--borde); padding:8px; border-radius:6px; max-height:320px; overflow:auto; }
+  table { border-collapse:collapse; margin:8px 0; font-size:13px; }
+  th, td { border:1px solid var(--borde); padding:4px 8px; text-align:left; vertical-align:top; }
+  form { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:1px solid var(--borde); padding:10px 16px; }
+  .fila { max-width:980px; margin:0 auto; display:flex; gap:8px; }
+  textarea { flex:1; min-height:52px; max-height:160px; resize:vertical; padding:8px; border-radius:8px; border:1px solid var(--borde); background:var(--bg); color:var(--txt); font:inherit; }
+  button { border:1px solid var(--pri); background:var(--pri); color:#fff; border-radius:8px; padding:8px 14px; cursor:pointer; font:inherit; }
+  button.sec { background:transparent; color:var(--pri); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button:focus-visible, textarea:focus-visible, summary:focus-visible { outline:3px solid var(--warnb); outline-offset:2px; }
+  .pensando { color:var(--muted); font-style:italic; }
+  .sugerencias { max-width:980px; margin:0 auto 6px; display:flex; flex-wrap:wrap; gap:6px; }
+  .sugerencias button { font-size:12px; padding:4px 10px; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Registro de Contratos Vigentes</h1><small id="estado">conectando…</small></div>
+  <div class="acciones">
+    <button type="button" class="sec" id="btn-nueva">Nueva sesión</button>
+    <button type="button" class="sec" id="btn-reset" title="Borra out/ para repetir la demo">Reiniciar datos</button>
+  </div>
+</header>
+<main id="chat" aria-live="polite"></main>
+<form id="form">
+  <div class="sugerencias" id="sugerencias">
+    <button type="button" class="sec" data-texto="Procesa el buzón de contratos con fecha de hoy 2026-09-03. Registra lo que esté limpio, muéstrame lo que requiere revisión campo por campo y termina con el reporte de alertas. No registres nada dudoso sin preguntarme.">▶ Prompt de la demo</button>
+    <button type="button" class="sec" data-texto="Confirmo el valor 0 y la fecha fin 2027-08-31">✔ Confirmar msg-006</button>
+  </div>
+  <div class="fila">
+    <label for="entrada" class="sr" style="position:absolute;left:-9999px">Mensaje</label>
+    <textarea id="entrada" placeholder="Escribe al agente… (Enter envía, Shift+Enter nueva línea)"></textarea>
+    <button type="submit" id="enviar">Enviar</button>
+  </div>
+</form>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id)
+  const chat = $("chat"), entrada = $("entrada"), enviar = $("enviar"), estado = $("estado")
+  let sessionId = localStorage.getItem("sessionId") || nuevoId()
+  let claveAcceso = sessionStorage.getItem("accessKey") || ""
+  localStorage.setItem("sessionId", sessionId)
+
+  function nuevoId() { return "s-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36) }
+  function esc(t) { return String(t).replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])) }
+
+  // Markdown mínimo y seguro (escapa primero): tablas, títulos, listas, negrita, código.
+  function md(texto) {
+    const bloques = esc(texto).split(/```/)
+    return bloques.map((b, i) => i % 2 ? `<pre>${b.replace(/^\w*\n/, "")}</pre>` : mdLineas(b)).join("")
+  }
+  function inline(t) { return t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>") }
+  function mdLineas(t) {
+    const lineas = t.split("\n"), out = []
+    for (let i = 0; i < lineas.length; i++) {
+      const l = lineas[i]
+      if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|[\s:|-]+\|\s*$/.test(lineas[i + 1] || "")) {
+        const celdas = (x) => x.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim()))
+        let html = "<table><thead><tr>" + celdas(l).map((c) => `<th>${c}</th>`).join("") + "</tr></thead><tbody>"
+        i += 2
+        while (i < lineas.length && /^\s*\|.*\|\s*$/.test(lineas[i])) { html += "<tr>" + celdas(lineas[i]).map((c) => `<td>${c}</td>`).join("") + "</tr>"; i++ }
+        out.push(html + "</tbody></table>"); i--; continue
+      }
+      const h = l.match(/^(#{1,4})\s+(.*)$/)
+      if (h) { out.push(`<h${h[1].length + 2}>${inline(h[2])}</h${h[1].length + 2}>`); continue }
+      if (/^\s*[-*]\s+/.test(l)) { out.push(`<div>• ${inline(l.replace(/^\s*[-*]\s+/, ""))}</div>`); continue }
+      out.push(l.trim() ? `<div>${inline(l)}</div>` : "<br>")
+    }
+    return out.join("")
+  }
+
+  function resumenArgs(a) { const s = JSON.stringify(a); return s.length > 120 ? s.slice(0, 120) + "…" : s }
+  function pintarTool(t) {
+    let bonito = t.resultado
+    try { bonito = JSON.stringify(JSON.parse(t.resultado), null, 2) } catch {}
+    return `<details class="tool"><summary>🔧 <strong>${esc(t.name)}</strong> <code>${esc(resumenArgs(t.args))}</code> → <span class="${t.ok ? "estado-ok" : "estado-err"}">${t.ok ? "✔" : "✖"} ${esc(t.resumen)}</span></summary><pre>${esc(bonito)}</pre></details>`
+  }
+  function pintar(ev) {
+    const div = document.createElement("div")
+    const confirmar = ev.rol === "assistant" && ev.needsConfirmation
+    div.className = `msg ${ev.rol}${confirmar ? " confirmar" : ""}`
+    const tools = (ev.toolCalls || []).map(pintarTool).join("")
+    div.innerHTML = `<div class="rol">${ev.rol === "user" ? "Tú" : "Agente"}</div>`
+      + (confirmar ? `<div class="banner">⚠️ El agente necesita tu confirmación antes de registrar</div>` : "")
+      + tools + `<div>${ev.rol === "user" ? esc(ev.texto).replace(/\n/g, "<br>") : md(ev.texto)}</div>`
+    chat.appendChild(div)
+    div.scrollIntoView({ behavior: "smooth", block: "end" })
+  }
+
+  async function api(ruta, opciones = {}) {
+    const r = await fetch(ruta, { ...opciones, headers: { "content-type": "application/json", "x-access-key": claveAcceso, ...(opciones.headers || {}) } })
+    if (r.status === 401) {
+      claveAcceso = prompt("Este enlace está protegido. Ingresa la clave de acceso:") || ""
+      sessionStorage.setItem("accessKey", claveAcceso)
+      return api(ruta, opciones)
+    }
+    const datos = await r.json().catch(() => ({ error: "respuesta no válida del servidor" }))
+    if (!r.ok) throw new Error(datos.error || `error ${r.status}`)
+    return datos
+  }
+
+  async function cargar() {
+    try {
+      const h = await (await fetch("/api/health")).json()
+      estado.textContent = `Modelo: ${h.provider} · ${h.model} · sesión ${sessionId}`
+      const s = await api(`/api/sessions/${sessionId}`)
+      chat.innerHTML = ""
+      s.eventos.forEach(pintar)
+    } catch (e) { estado.textContent = "Error: " + e.message }
+  }
+
+  async function mandar(texto) {
+    if (!texto.trim()) return
+    pintar({ rol: "user", texto })
+    entrada.value = ""; enviar.disabled = true
+    const p = document.createElement("div"); p.className = "msg pensando"; p.textContent = "El agente está pensando y usando herramientas…"
+    chat.appendChild(p)
+    try {
+      const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ sessionId, message: texto }) })
+      p.remove()
+      pintar({ rol: "assistant", texto: r.reply, toolCalls: r.toolCalls, needsConfirmation: r.needsConfirmation })
+    } catch (e) {
+      p.remove()
+      pintar({ rol: "assistant", texto: "⚠️ " + e.message + ". Puedes intentarlo de nuevo." })
+    } finally { enviar.disabled = false; entrada.focus() }
+  }
+
+  $("form").addEventListener("submit", (e) => { e.preventDefault(); mandar(entrada.value) })
+  entrada.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mandar(entrada.value) } })
+  $("sugerencias").addEventListener("click", (e) => { const t = e.target.closest("button"); if (t) { entrada.value = t.dataset.texto; entrada.focus() } })
+  $("btn-nueva").addEventListener("click", () => { sessionId = nuevoId(); localStorage.setItem("sessionId", sessionId); cargar() })
+  $("btn-reset").addEventListener("click", async () => {
+    if (!confirm("¿Reiniciar out/ (maestro, historial, alertas y sesiones) para repetir la demo?")) return
+    try { await api("/api/reset", { method: "POST" }); sessionId = nuevoId(); localStorage.setItem("sessionId", sessionId); cargar() }
+    catch (e) { alert(e.message) }
+  })
+  cargar()
+})()
+</script>
+</body>
+</html>
